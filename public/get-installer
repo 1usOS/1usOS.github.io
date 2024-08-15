@@ -18,7 +18,7 @@ colorecho() {
 }
 ################################################################
 # Default variables
-install_target="radxa-rock-5b"
+#install_target="radxa-rock-5b"
 release_tag="b08-pre"
 
 ################################################################
