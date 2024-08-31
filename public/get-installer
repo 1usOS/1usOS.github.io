@@ -16,10 +16,25 @@ colorecho() {
     text="$2"
     printf "${color}${text}${NC}\n"
 }
+
+# Sudo override
+sudo () {
+    local command=$@
+    if [ "$(id -u)" -eq 0 ]; then
+        #echo "Running in root."
+        command "$@"
+    else
+        #echo "Running with sudo."
+        command sudo "$@"
+    fi
+}
+
 ################################################################
-# Default variables
-#install_target="radxa-rock-5b"
-release_tag="b08-pre"
+# Configure variables
+gh_repo="kwankiu/archlinux-installer"
+file_prefix=""
+file_suffix="-archlinux-installer"
+file_extension=".img.xz"
 
 ################################################################
 # Loop through the arguments
@@ -41,6 +56,9 @@ for arg in "$@"; do
     --device=*)
         install_target="${arg#*=}"
         ;;
+    --disk=*)
+        install_disk="${arg#*=}"
+        ;;
     -*)
         colorecho "$RED" "Invalid command or argument."
         exit 1
@@ -49,10 +67,14 @@ for arg in "$@"; do
 done
 
 ################################################################
+# Get latest release tag
+    if [ -z "$release_tag" ]; then
+        release_tag="$(curl -s "https://api.github.com/repos/${gh_repo}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')"
+    fi
 # Auto detect install target from devicetree
     if [ -z "$install_target" ]; then
         if [ -f "/proc/device-tree/compatible" ]; then
-            install_target="$(sed 's/\x00/ /g; s/,/ /g' /proc/device-tree/compatible | awk '{print $1, $2}' | tr ' ' '-')"
+            install_target="$(sed 's/\x00/ /g; s/,/ /g' /proc/device-tree/compatible | awk '{print $1, $2}' | tr ' ' '-' | head -n 1)"
         fi
     fi
 ################################################################
@@ -76,17 +98,29 @@ if [ -n "$install_target" ]; then
             exit 1
             ;;
     esac
-    image_url="https://github.com/kwankiu/archlinux-installer/releases/download/${release_tag}/${install_target}-archlinux-installer.img.xz"
+    image_url="https://github.com/${gh_repo}/releases/download/${release_tag}/${install_target}${file_suffix}${file_extension}"
     curl -LO $image_url
 else
     colorecho "$GREEN" "Unable to retrieve device model, looking for the latest generic image ..."
-    curl -LO https://github.com/kwankiu/archlinux-installer/releases/download/UEFI-${release_tag}/generic-archlinux-installer-UEFI.img.xz
+    install_target="generic"
+    image_url="https://github.com/${gh_repo}/releases/download/UEFI-${release_tag}/${install_target}${file_suffix}-UEFI${file_extension}"
+    curl -LO $image_url
 fi
 
-# Flash image with OOWOW if exists
+# Get downloaded image name
+image_name="$(basename $image_url)"
+
 if [ -f "/opt/oowow" ]; then
-    colorecho "$GREEN" "Flashing image $(basename $image_url) using OOWOW"
-    image_write2emmc $(basename $image_url)
+    # Flash with OOWOW
+    colorecho "$GREEN" "Flashing image $image_name using OOWOW"
+    image_write2emmc $image_name
+
+elif [ -n "$install_disk" ]; then
+    # Flash to disk
+    colorecho "$GREEN" "Extracting image $image_name ..."
+    unxz $image_name
+    colorecho "$GREEN" "Flashing image ${image_name%.xz} to $install_disk"
+    sudo dd if="${image_name%.xz}" of="$install_disk" bs=1M
 else
-    colorecho "$GREEN" "Downloaded image $(basename $image_url)"
+    colorecho "$GREEN" "Downloaded image $image_name"
 fi
